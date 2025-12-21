@@ -226,9 +226,8 @@
 		liver.apply_organ_damage(-healing_bonus * REM * seconds_per_tick)
 
 	var/water_adaptation = HAS_TRAIT(affected_mob, TRAIT_WATER_ADAPTATION)
-	if(affected_mob.blood_volume)
-		var/blood_restored = water_adaptation ? 0.3 : 0.1
-		affected_mob.blood_volume += blood_restored * REM * seconds_per_tick // water is good for you!
+	var/blood_restored = water_adaptation ? 0.3 : 0.1
+	affected_mob.adjust_blood_volume(blood_restored * REM * seconds_per_tick) // water is good for you!
 	var/drunkness_restored = water_adaptation ? -0.5 : -0.25
 	affected_mob.adjust_drunk_effect(drunkness_restored * REM * seconds_per_tick) // and even sobers you up slowly!!
 	if(water_adaptation)
@@ -288,8 +287,8 @@
 /datum/wound/burn/flesh/on_saltwater(reac_volume)
 	// Similar but better stats from normal salt.
 	sanitization += VALUE_PER(0.6, 30) * reac_volume
-	infestation -= max(VALUE_PER(0.5, 30) * reac_volume, 0)
-	infestation_rate += VALUE_PER(0.07, 30) * reac_volume
+	infection -= max(VALUE_PER(0.5, 30) * reac_volume, 0)
+	infection_rate += VALUE_PER(0.07, 30) * reac_volume
 	to_chat(victim, span_notice("The salt water splashes over [LOWER_TEXT(src)], soaking up the... miscellaneous fluids. It feels somewhat better afterwards."))
 	return
 
@@ -465,8 +464,8 @@
 		need_mob_update += affected_mob.adjustBruteLoss(-2 * REM * seconds_per_tick, updating_health = FALSE)
 		need_mob_update += affected_mob.adjustFireLoss(-2 * REM * seconds_per_tick, updating_health = FALSE)
 		need_mob_update = TRUE
-		if(ishuman(affected_mob) && affected_mob.blood_volume < BLOOD_VOLUME_NORMAL)
-			affected_mob.blood_volume += 3 * REM * seconds_per_tick
+		if(ishuman(affected_mob))
+			affected_mob.adjust_blood_volume(3 * REM * seconds_per_tick, maximum = BLOOD_VOLUME_NORMAL)
 
 			var/datum/wound/bloodiest_wound
 
@@ -560,7 +559,7 @@
 /datum/reagent/spraytan/expose_mob(mob/living/exposed_mob, methods=TOUCH, reac_volume, show_message = TRUE, touch_protection = 0)
 	. = ..()
 	if(ishuman(exposed_mob))
-		if(methods & (PATCH|VAPOR) && touch_protection >= 1)
+		if(methods & (PATCH|VAPOR) && touch_protection < 1)
 			var/mob/living/carbon/human/exposed_human = exposed_mob
 			if(HAS_TRAIT(exposed_human, TRAIT_USES_SKINTONES))
 				switch(exposed_human.skin_tone)
@@ -1101,7 +1100,7 @@
 		return
 
 	for(var/datum/surgery/surgery as anything in exposed_carbon.surgeries)
-		surgery.speed_modifier = max(0.2, surgery.speed_modifier)
+		surgery.speed_modifier = min(0.8, surgery.speed_modifier)
 
 /datum/reagent/space_cleaner/sterilizine/on_burn_wound_processing(datum/wound/burn/flesh/burn_wound)
 	burn_wound.sanitization += 0.9
@@ -2915,8 +2914,12 @@
 		need_mob_update += drinker.adjustOxyLoss(-2 * REM * seconds_per_tick, updating_health = FALSE)
 		need_mob_update += drinker.adjustBruteLoss(-2 * REM * seconds_per_tick, updating_health = FALSE)
 		need_mob_update += drinker.adjustFireLoss(-2 * REM * seconds_per_tick, updating_health = FALSE)
-		if(drinker.blood_volume < BLOOD_VOLUME_NORMAL)
-			drinker.blood_volume += 3 * REM * seconds_per_tick
+		drinker.adjust_blood_volume(3 * REM * seconds_per_tick, maximum = BLOOD_VOLUME_NORMAL)
+		// Slowly regulates your body temp
+		drinker.adjust_bodytemperature((drinker.get_body_temp_normal() - drinker.bodytemperature) / 5)
+		for(var/datum/reagent/reagent as anything in drinker.reagents.reagent_list)
+			if(reagent != src)
+				drinker.reagents.remove_reagent(reagent.type, 2 * reagent.purge_multiplier * REM * seconds_per_tick)
 	else
 		need_mob_update = drinker.adjustOrganLoss(ORGAN_SLOT_BRAIN, 3 * REM * seconds_per_tick, 150)
 		need_mob_update += drinker.adjustToxLoss(2 * REM * seconds_per_tick, updating_health = FALSE)
@@ -3225,8 +3228,7 @@
 	RegisterSignal(affected_human, COMSIG_CARBON_LOSE_ORGAN, PROC_REF(on_organ_removed))
 	var/obj/item/organ/eyes/eyes = affected_human.get_organ_slot(ORGAN_SLOT_EYES)
 	if (eyes && !IS_ROBOTIC_ORGAN(eyes))
-		prev_ignore_lighting = eyes.overlay_ignore_lighting
-		eyes.overlay_ignore_lighting = TRUE
+		ADD_TRAIT(affected_human, TRAIT_LUMINESCENT_EYES, REF(src))
 
 /datum/reagent/luminescent_fluid/on_mob_end_metabolize(mob/living/affected_mob)
 	. = ..()
@@ -3238,7 +3240,7 @@
 	affected_human.remove_eye_color(EYE_COLOR_LUMINESCENT_PRIORITY)
 	var/obj/item/organ/eyes/eyes = affected_human.get_organ_slot(ORGAN_SLOT_EYES)
 	if (eyes && !IS_ROBOTIC_ORGAN(eyes) && !overdosed)
-		eyes.overlay_ignore_lighting = prev_ignore_lighting
+		REMOVE_TRAIT(affected_human, TRAIT_LUMINESCENT_EYES, REF(src))
 
 /datum/reagent/luminescent_fluid/on_mob_life(mob/living/affected_mob, seconds_per_tick, times_fired)
 	. = ..()
@@ -3257,14 +3259,13 @@
 	SIGNAL_HANDLER
 
 	if (istype(new_eyes) && !IS_ROBOTIC_ORGAN(new_eyes))
-		prev_ignore_lighting = new_eyes.overlay_ignore_lighting
-		new_eyes.overlay_ignore_lighting = TRUE
+		ADD_TRAIT(source, TRAIT_LUMINESCENT_EYES, REF(src))
 
 /datum/reagent/luminescent_fluid/proc/on_organ_removed(mob/living/source, obj/item/organ/eyes/old_eyes)
 	SIGNAL_HANDLER
 
 	if (istype(old_eyes) && !IS_ROBOTIC_ORGAN(old_eyes) && !overdosed)
-		old_eyes.overlay_ignore_lighting = prev_ignore_lighting
+		REMOVE_TRAIT(source, TRAIT_LUMINESCENT_EYES, REF(src))
 
 /datum/reagent/luminescent_fluid/overdose_start(mob/living/affected_mob)
 	. = ..()

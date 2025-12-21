@@ -95,7 +95,7 @@
 	. = ..()
 	if(ispath(pin))
 		pin = new pin
-		pin.gun_insert(new_gun = src)
+		pin.gun_insert(new_gun = src, starting = TRUE)
 
 	add_seclight_point()
 	add_bayonet_point()
@@ -147,6 +147,8 @@
 	. = ..()
 	if(isliving(hit_atom))
 		var/mob/living/thrower = throwingdatum?.get_thrower()
+		if(!isliving(thrower))
+			return
 		toss_gun_hard(thrower, hit_atom)
 
 /obj/item/gun/proc/toss_gun_hard(mob/living/thrower, mob/living/target) //throw a gun at them. They don't expect it.
@@ -360,12 +362,6 @@
 			return
 		if(target == user && (user.zone_selected != BODY_ZONE_PRECISE_MOUTH && doafter_self_shoot)) //so we can't shoot ourselves (unless mouth selected)
 			return
-		if(iscarbon(target))
-			var/mob/living/carbon/C = target
-			for(var/i in C.all_wounds)
-				var/datum/wound/W = i
-				if(W.try_treating(src, user))
-					return // another coward cured!
 
 	if(istype(user))//Check if the user can use the gun, if the user isn't alive(turrets) assume it can.
 		var/mob/living/L = user
@@ -643,7 +639,7 @@
 	if(pin)
 		qdel(pin)
 	var/obj/item/firing_pin/new_pin = new
-	new_pin.gun_insert(new_gun = src)
+	new_pin.gun_insert(new_gun = src, starting = TRUE)
 
 //Happens before the actual projectile creation
 /obj/item/gun/proc/before_firing(atom/target,mob/user)
